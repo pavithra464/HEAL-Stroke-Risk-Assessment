@@ -1,0 +1,40 @@
+{
+  "feature_names": [
+    "Systolic_BP",
+    "Diastolic_BP",
+    "BMI",
+    "HbA1c",
+    "Age",
+    "Diabetes",
+    "Smoker",
+    "Sex",
+    "Hypertension",
+    "Heart_Disease"
+  ],
+  "mean_transformed": {
+    "Systolic_BP": -7.219172902700734e-16,
+    "Diastolic_BP": -4.811253097162052e-16,
+    "BMI": 1.9859605253299986e-16,
+    "HbA1c": -3.449058464314455e-16,
+    "Age": -3.66921113224942e-17,
+    "Diabetes": 0.1399431964885102,
+    "Smoker": 0.41001807384456496,
+    "Sex": 0.555125225923057,
+    "Hypertension": 0.3831655047766589,
+    "Heart_Disease": 0.09914794732765299
+  },
+  "base_value": -0.7913367632680549,
+  "coefficients": {
+    "Systolic_BP": -0.14924474069544763,
+    "Diastolic_BP": 0.3605855494814883,
+    "BMI": -0.07751635267984662,
+    "HbA1c": 0.06705288274023681,
+    "Age": 0.9219336023074952,
+    "Diabetes": 0.5517062709704036,
+    "Smoker": 0.7976980882121566,
+    "Sex": -0.12109656272468144,
+    "Hypertension": 0.7559855176633208,
+    "Heart_Disease": 1.118613542186424
+  },
+  "intercept": -1.528966988287614
+}

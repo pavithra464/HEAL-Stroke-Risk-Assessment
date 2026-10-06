@@ -1,0 +1,5 @@
+{
+  "locked_threshold": 0.5,
+  "selection_criterion": "Maximize Balanced Accuracy subject to Sensitivity >= 75%",
+  "model_version": "Phase 8B Corrected"
+}

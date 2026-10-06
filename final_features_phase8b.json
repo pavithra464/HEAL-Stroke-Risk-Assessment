@@ -1,0 +1,28 @@
+{
+  "features": [
+    "Systolic_BP",
+    "Diastolic_BP",
+    "BMI",
+    "HbA1c",
+    "Age",
+    "Diabetes",
+    "Smoker",
+    "Sex",
+    "Hypertension",
+    "Heart_Disease"
+  ],
+  "numerical_features": [
+    "Systolic_BP",
+    "Diastolic_BP",
+    "BMI",
+    "HbA1c",
+    "Age"
+  ],
+  "categorical_features": [
+    "Diabetes",
+    "Smoker",
+    "Sex",
+    "Hypertension",
+    "Heart_Disease"
+  ]
+}

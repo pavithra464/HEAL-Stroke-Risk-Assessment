@@ -1,0 +1,9 @@
+Metric,Value,Fraction / Baseline,Description
+Accuracy,73.37%,711/969,Overall correct classification rate
+Sensitivity / Recall,77.78%,35/45 detected,Primary screening sensitivity
+Specificity (TNR),73.16%,676/924 cleared,Triage workload reduction
+Precision (PPV),12.37%,35/283 alerts,Positive predictive value
+F1-Score,0.2134,-,Harmonic mean of prec & rec
+Balanced Accuracy,75.47%,-,Macro-average sensitivity & specificity
+ROC-AUC,0.8259,vs 0.5000 baseline,Global discriminative capability
+PR-AUC,0.1832,vs 4.64% prevalence,3.94x above chance

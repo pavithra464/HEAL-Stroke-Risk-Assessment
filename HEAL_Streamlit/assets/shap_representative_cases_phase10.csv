@@ -1,0 +1,5 @@
+Quadrant,SEQN,Actual Label,Predicted Label,Predicted Probability,Top Push Toward Stroke,Top Push Toward No Stroke,Description
+True Positive (TP),139720,Reported Stroke (1),Stroke (1),0.9121,"Age (+1.20), Heart_Disease (+1.01), Smoker (+0.47)","Diastolic_BP (-0.03), HbA1c (-0.03), Diabetes (-0.08)",Participant with reported stroke history classified as Stroke.
+True Negative (TN),136014,No Stroke (0),No Stroke (0),0.0184,"Sex (+0.07), Systolic_BP (+0.05), BMI (+0.01)","HbA1c (-0.07), Diabetes (-0.08), Heart_Disease (-0.11)",Participant without reported stroke history classified as No Stroke.
+False Positive (FP),137444,No Stroke (0),Stroke (1),0.9405,"Age (+1.25), Heart_Disease (+1.01), Diabetes (+0.47)","Systolic_BP (-0.03), Sex (-0.05), Diastolic_BP (-0.07)",Participant without reported stroke history classified as Stroke.
+False Negative (FN),137773,Reported Stroke (1),No Stroke (0),0.2216,"Age (+0.39), Sex (+0.07), Systolic_BP (+0.07)","BMI (-0.01), Diabetes (-0.08), Heart_Disease (-0.11)",Participant with reported stroke history classified as No Stroke.

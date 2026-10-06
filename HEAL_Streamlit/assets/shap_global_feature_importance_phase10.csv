@@ -1,0 +1,11 @@
+Feature,Mean Absolute SHAP,Model Beta Coefficient,Rank,Direction of Association
+Age,0.7886991208380199,0.9219336023074952,1,Positive (Higher values increase model output)
+Smoker,0.3908473220473181,0.7976980882121566,2,Positive (Higher values increase model output)
+Hypertension,0.3592482725454869,0.7559855176633208,3,Positive (Higher values increase model output)
+Diastolic_BP,0.28024993690810335,0.3605855494814883,4,Positive (Higher values increase model output)
+Heart_Disease,0.19977334662494936,1.118613542186424,5,Positive (Higher values increase model output)
+Diabetes,0.13822831683781267,0.5517062709704036,6,Positive (Higher values increase model output)
+Systolic_BP,0.11118636723447774,-0.14924474069544763,7,Negative (Higher values decrease model output)
+Sex,0.05996948291909994,-0.12109656272468144,8,Negative (Higher values decrease model output)
+BMI,0.058508318691522,-0.07751635267984662,9,Negative (Higher values decrease model output)
+HbA1c,0.03844309706852576,0.06705288274023681,10,Positive (Higher values increase model output)
