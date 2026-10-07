@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 import seaborn as sns
+import shap
 
 warnings.filterwarnings("ignore")
 
@@ -214,7 +215,9 @@ def load_heal_model():
     model_path = os.path.join(APP_DIR, "model", "final_model_pipeline_phase8b.joblib")
     features_path = os.path.join(APP_DIR, "model", "final_features_phase8b.json")
     threshold_path = os.path.join(APP_DIR, "model", "final_threshold_phase8b.json")
-    bg_path = os.path.join(APP_DIR, "model", "shap_background.json")
+    bg_data_path = os.path.join(APP_DIR, "model", "dev_background_trans.csv")
+    if not os.path.exists(bg_data_path):
+        bg_data_path = os.path.join(os.path.dirname(APP_DIR), "dev_background_trans.csv")
     params_path = os.path.join(APP_DIR, "model", "pipeline_parameters.json")
     
     pipeline = None
@@ -228,15 +231,12 @@ def load_heal_model():
         feature_spec = json.load(f)
     with open(threshold_path) as f:
         threshold_spec = json.load(f)
-    with open(bg_path) as f:
-        shap_bg = json.load(f)
         
     pipeline_params = {}
     if os.path.exists(params_path):
         with open(params_path) as f:
             pipeline_params = json.load(f)
     else:
-        # Fallback exact specifications for locked Phase 8B model
         pipeline_params = {
             'numerical_features': ['Systolic_BP', 'Diastolic_BP', 'BMI', 'HbA1c', 'Age'],
             'numerical_imputer_medians': [120.33333333333331, 74.0, 28.5, 5.5, 57.0],
@@ -247,8 +247,19 @@ def load_heal_model():
             'coefficients': [-0.14924474069544763, 0.3605855494814883, -0.07751635267984662, 0.06705288274023681, 0.9219336023074952, 0.5517062709704036, 0.7976980882121566, -0.12109656272468144, 0.7559855176633208, 1.118613542186424],
             'intercept': -1.528966988287614
         }
-        
-    return pipeline, feature_spec, threshold_spec, shap_bg, pipeline_params
+
+    # Initialize SHAP LinearExplainer using independent development background masker (Phase 10)
+    explainer = None
+    if pipeline is not None and os.path.exists(bg_data_path):
+        try:
+            clf = pipeline.named_steps['classifier']
+            bg_df = pd.read_csv(bg_data_path)
+            masker = shap.maskers.Independent(data=bg_df, max_samples=len(bg_df))
+            explainer = shap.LinearExplainer(clf, masker=masker)
+        except Exception:
+            explainer = None
+            
+    return pipeline, feature_spec, threshold_spec, explainer, pipeline_params
 
 @st.cache_data
 def load_deep_dive_assets():
@@ -271,7 +282,7 @@ def load_deep_dive_assets():
             
     return df_8b, df_p9, df_shap, curves
 
-pipeline_8b, feature_spec, threshold_spec, shap_bg, pipeline_params = load_heal_model()
+pipeline_8b, feature_spec, threshold_spec, explainer, pipeline_params = load_heal_model()
 df_metrics_8b, df_metrics_p9, df_shap_global, evaluation_curves = load_deep_dive_assets()
 
 LOCKED_THRESHOLD = float(threshold_spec.get('locked_threshold', 0.50))
@@ -284,14 +295,14 @@ CATEGORICAL_FEATURES = feature_spec['categorical_features']
 # -----------------------------------------------------------------------------
 def predict_patient(patient_dict):
     """
-    Execute inference strictly using Phase 8B feature order.
+    Execute inference strictly using Phase 8B feature order and locked pipeline.
     Robust against cross-version environment incompatibilities (Python 3.9-3.14+, scikit-learn).
     Returns: prob (float), pred_class (int), transformed_df (pd.DataFrame)
     """
     input_df = pd.DataFrame([patient_dict])[MODEL_FEATURES]
     feat_order = NUMERICAL_FEATURES + CATEGORICAL_FEATURES
     
-    # 1. Standard pipeline execution
+    # 1. Standard pipeline execution using locked Phase 8B pipeline
     if pipeline_8b is not None:
         try:
             prob = float(pipeline_8b.predict_proba(input_df)[0, 1])
@@ -334,45 +345,58 @@ def predict_patient(patient_dict):
 
 def compute_local_shap(transformed_df):
     """
-    Calculates exact local additive SHAP attributions:
-    phi_i = beta_i * (x_i - mu_i)
-    Matches Phase 10 LinearExplainer with development background masking.
+    Generate exact local additive SHAP attributions using shap.LinearExplainer
+    with independent development-cohort background masking (Phase 10 methodology).
+    
+    Verifies mathematical additivity:
+    base_value + sum(SHAP values) ≈ Logistic Regression decision_function output.
     """
     feat_order = NUMERICAL_FEATURES + CATEGORICAL_FEATURES
-    x_vec = transformed_df.iloc[0]
+    clf = pipeline_8b.named_steps['classifier']
     
+    # 1. Compute exact SHAP values directly from LinearExplainer
+    shap_exp = explainer(transformed_df)
+    shap_vals = shap_exp.values[0]
+    base_val = float(shap_exp.base_values[0])
+    
+    # 2. Decision function output from the same Logistic Regression classifier
+    decision_val = float(clf.decision_function(transformed_df)[0])
+    
+    # 3. Additivity verification: base_value + sum(SHAP) ≈ decision_function output
+    shap_sum = float(np.sum(shap_vals))
+    additivity_error = abs((base_val + shap_sum) - decision_val)
+    additivity_passed = bool(additivity_error < 1e-5)
+    
+    # 4. Construct attribution records
     shap_records = []
-    base_val = shap_bg['base_value']
-    
-    for feat in feat_order:
-        beta = shap_bg['coefficients'][feat]
-        mu = shap_bg['mean_transformed'][feat]
-        x_val = x_vec[feat]
-        shap_val = beta * (x_val - mu)
+    x_vec = transformed_df.iloc[0]
+    for feat, s_val in zip(feat_order, shap_vals):
         shap_records.append({
             'Feature': feat,
-            'SHAP Value': shap_val,
-            'Transformed Value': x_val,
-            'Background Mean': mu,
-            'Beta': beta
+            'Display Name': FEATURE_LABELS.get(feat, feat),
+            'SHAP Value': float(s_val),
+            'Transformed Value': float(x_vec[feat]),
+            'Abs Impact': abs(float(s_val))
         })
         
     shap_df = pd.DataFrame(shap_records)
-    shap_df['Abs Impact'] = shap_df['SHAP Value'].abs()
+    # Sort features by absolute SHAP value: largest |SHAP| first
     shap_df = shap_df.sort_values(by='Abs Impact', ascending=False).reset_index(drop=True)
-    return base_val, shap_df
+    
+    return base_val, shap_df, decision_val, additivity_error, additivity_passed
 
-# Friendly display names for clean lay-friendly UI
+
+# Friendly display names for clean lay-friendly UI (Section 14 exact specification)
 FEATURE_LABELS = {
-    'Age': 'Age',
     'Systolic_BP': 'Systolic Blood Pressure',
     'Diastolic_BP': 'Diastolic Blood Pressure',
-    'BMI': 'Body Mass Index (BMI)',
-    'HbA1c': 'Blood Sugar (HbA1c)',
-    'Diabetes': 'Diabetes Status',
+    'BMI': 'Body Mass Index',
+    'HbA1c': 'HbA1c',
+    'Age': 'Age',
+    'Diabetes': 'Diabetes',
     'Smoker': 'Smoking History',
     'Sex': 'Biological Sex',
-    'Hypertension': 'Hypertension (High Blood Pressure)',
+    'Hypertension': 'Hypertension',
     'Heart_Disease': 'Heart Disease History'
 }
 
@@ -577,7 +601,7 @@ if view_mode == "Clinical Assessment":
     st.markdown("### 2. Model Assessment Output")
     
     prob, pred_class, transformed_df = predict_patient(active_patient)
-    base_val, shap_df = compute_local_shap(transformed_df)
+    base_val, shap_df, decision_val, additivity_error, additivity_passed = compute_local_shap(transformed_df)
     
     res_col1, res_col2 = st.columns([1, 1])
     
@@ -614,74 +638,71 @@ if view_mode == "Clinical Assessment":
         """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # 3. CONTRIBUTING FACTORS & LOCAL SHAP GRAPH (SAME SCROLL)
+    # 3. INDIVIDUAL SHAP FEATURE ATTRIBUTION (SAME SCROLL)
     # -------------------------------------------------------------------------
     st.markdown("---")
-    st.markdown("### 3. Contributing Factors & Feature Attribution")
-    st.markdown("<p style='font-size: 1.0rem; color: #334155; font-weight: 500;'>Visual breakdown of how each clinical measurement pushed the assessment score higher or lower relative to population average.</p>", unsafe_allow_html=True)
+    st.markdown("### 3. Individual SHAP Feature Attribution")
+    st.markdown("<p style='font-size: 1.05rem; color: #334155; font-weight: 600;'>How the model arrived at this prediction</p>", unsafe_allow_html=True)
     
-    graph_col, factor_col = st.columns([3, 2])
-    
-    with graph_col:
-        # High contrast plot styling
-        plot_data = shap_df.copy()
-        plot_data['Display Name'] = plot_data['Feature'].map(FEATURE_LABELS)
-        plot_data = plot_data.sort_values(by='SHAP Value', ascending=True)
+    if not additivity_passed:
+        st.error(f"Internal Validation Error: SHAP additivity check failed (Error = {additivity_error:.2e} > 1e-5). Feature attribution cannot be validated.")
+    else:
+        # Sort features by absolute SHAP value ascending so largest |SHAP| appears first at the top of horizontal bar chart
+        plot_data = shap_df.sort_values(by='Abs Impact', ascending=True).reset_index(drop=True)
         
-        bar_colors = ['#dc2626' if val > 0 else '#2563eb' for val in plot_data['SHAP Value']]
-        
-        fig, ax = plt.subplots(figsize=(8.0, 5.2))
+        fig, ax = plt.subplots(figsize=(9.2, 5.6))
         fig.patch.set_facecolor('#ffffff')
         ax.set_facecolor('#ffffff')
         
-        bars = ax.barh(plot_data['Display Name'], plot_data['SHAP Value'], color=bar_colors, height=0.55)
-        ax.axvline(0, color='#475569', linestyle='--', linewidth=1.2)
-        ax.set_xlabel("Impact on Model Log-Odds (Pushing Higher or Lower)", fontsize=11, fontweight='bold', color='#0f172a', labelpad=8)
-        ax.set_title("Factors Influencing This Assessment", fontsize=12, fontweight='bold', color='#0f172a', pad=12)
+        bar_colors = ['#dc2626' if val > 0 else '#2563eb' for val in plot_data['SHAP Value']]
+        bars = ax.barh(plot_data['Display Name'], plot_data['SHAP Value'], color=bar_colors, height=0.56)
         
-        # High-contrast tick labels
-        ax.tick_params(axis='x', colors='#0f172a', labelsize=10.5)
+        # Center reference line at zero
+        ax.axvline(0, color='#334155', linestyle='-', linewidth=1.2, alpha=0.8)
+        
+        # Symmetric x-limits with padding so annotations fit cleanly
+        x_min = plot_data['SHAP Value'].min()
+        x_max = plot_data['SHAP Value'].max()
+        pad = max(abs(x_min), abs(x_max), 0.3) * 0.35
+        ax.set_xlim(min(x_min - pad, -0.2), max(x_max + pad, 0.2))
+        
+        for bar in bars:
+            w = bar.get_width()
+            align = 'left' if w >= 0 else 'right'
+            offset = 0.02 if w >= 0 else -0.02
+            ax.annotate(
+                f"{w:+.2f}",
+                (w + offset, bar.get_y() + bar.get_height() / 2),
+                ha=align, va='center', fontsize=9.5, fontweight='bold',
+                color='#991b1b' if w > 0 else '#1e40af'
+            )
+            
+        ax.set_xlabel("SHAP Value (← Pushes Toward No Stroke  |  Pushes Toward Stroke →)", fontsize=10.5, fontweight='bold', color='#0f172a', labelpad=10)
+        ax.set_title("Individual Feature Attribution (SHAP Values)", fontsize=12, fontweight='bold', color='#0f172a', pad=12)
+        
+        ax.tick_params(axis='x', colors='#0f172a', labelsize=10)
         ax.tick_params(axis='y', colors='#0f172a', labelsize=10.5)
         for spine in ax.spines.values():
             spine.set_color('#cbd5e1')
             spine.set_linewidth(1.0)
             
-        for bar in bars:
-            w = bar.get_width()
-            align = 'left' if w >= 0 else 'right'
-            offset = 0.03 if w >= 0 else -0.03
-            ax.annotate(
-                f"{w:+.2f}",
-                (w + offset, bar.get_y() + bar.get_height() / 2),
-                ha=align, va='center', fontsize=9.5, fontweight='bold',
-                color='#7f1d1d' if w > 0 else '#1e3a8a'
-            )
-            
         plt.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
-
-    with factor_col:
-        st.markdown("<p style='font-size: 1.05rem; font-weight: 700; color: #0f172a;'>Factors Increasing Model Score:</p>", unsafe_allow_html=True)
-        pos_items = shap_df[shap_df['SHAP Value'] > 0.01].sort_values(by='SHAP Value', ascending=False)
-        if len(pos_items) > 0:
-            for _, r in pos_items.iterrows():
-                fname = FEATURE_LABELS.get(r['Feature'], r['Feature'])
-                st.markdown(f'<div class="factor-item-pos">{fname} (+{r["SHAP Value"]:.2f} log-odds)</div>', unsafe_allow_html=True)
-        else:
-            st.markdown("<p style='color: #64748b; font-style: italic;'>None identified for this case.</p>", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("<p style='font-size: 1.05rem; font-weight: 700; color: #0f172a;'>Factors Decreasing Model Score:</p>", unsafe_allow_html=True)
-        neg_items = shap_df[shap_df['SHAP Value'] < -0.01].sort_values(by='SHAP Value', ascending=True)
-        if len(neg_items) > 0:
-            for _, r in neg_items.iterrows():
-                fname = FEATURE_LABELS.get(r['Feature'], r['Feature'])
-                st.markdown(f'<div class="factor-item-neg">{fname} ({r["SHAP Value"]:.2f} log-odds)</div>', unsafe_allow_html=True)
-        else:
-            st.markdown("<p style='color: #64748b; font-style: italic;'>None identified for this case.</p>", unsafe_allow_html=True)
-
-    st.markdown("<p style='color: #475569; font-size: 0.92rem; font-weight: 500; margin-top: 10px;'>Note: These values describe statistical feature attributions within the model, not medical causes.</p>", unsafe_allow_html=True)
+        
+        # Simple text explanation matching Section 12 requirements
+        st.markdown(r"""
+        <div style="background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 14px 18px; border-radius: 6px; margin-top: 12px; margin-bottom: 16px;">
+            <p style="margin: 0; color: #0f172a; font-size: 0.96rem; font-weight: 600; line-height: 1.5;">
+                Positive SHAP values increase the model's output toward Stroke, while negative SHAP values decrease the model's output toward No Stroke.
+            </p>
+            <p style="margin: 8px 0 0 0; color: #334155; font-size: 0.90rem; line-height: 1.5;">
+                These values explain the model's prediction and do not represent medical causation. Each measurement contributed to the model prediction relative to the independent development-cohort background reference.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.caption(f"✓ Exact SHAP additivity verified: Base Value ({base_val:+.4f}) + Σ(SHAP) = Model Logit ({decision_val:+.4f}) | Numerical error: {additivity_error:.2e} < 1e-5.")
 
 # -----------------------------------------------------------------------------
 # VIEW 2: MODEL DETAILS & SCIENTIFIC VALIDATION (SEPARATE TECHNICAL VIEW)
